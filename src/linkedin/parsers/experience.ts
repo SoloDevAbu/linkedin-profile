@@ -1,4 +1,5 @@
 import type { RscResponse } from './rsc.js';
+import { parseToStructuredItems } from './utils.js';
 
 export function parseExperience(response: RscResponse): any[] {
   const text = response.text;
@@ -24,9 +25,7 @@ export function parseExperience(response: RscResponse): any[] {
   const uniqueValues = [...new Set(values)];
   
   if (uniqueValues.length > 0) {
-    results.push({
-      extractedText: uniqueValues
-    });
+    return parseToStructuredItems(uniqueValues);
   }
   
   return results;
