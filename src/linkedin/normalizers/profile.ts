@@ -1,10 +1,12 @@
-import type { ParsedBaseProfile } from '../parsers/profile.js';
-import type { ProfileResponse } from '../../schemas/profile.js';
+import type { ParsedBaseProfile } from "../parsers/profile.js";
+import type { ProfileResponse } from "../../schemas/profile.js";
 
-export function normalizeBaseProfile(input: ParsedBaseProfile): ProfileResponse {
+export function normalizeBaseProfile(
+  input: ParsedBaseProfile,
+): ProfileResponse {
   return {
-    url: '',
-    publicIdentifier: '',
+    url: "",
+    publicIdentifier: "",
     profileId: input.profileId,
     name: input.name,
     headline: input.headline,
@@ -16,6 +18,6 @@ export function normalizeBaseProfile(input: ParsedBaseProfile): ProfileResponse 
     projects: [],
     skills: [],
     certifications: [],
-    languages: []
+    languages: [],
   };
 }

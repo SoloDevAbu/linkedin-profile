@@ -1,9 +1,9 @@
-import Fastify from 'fastify';
-import { healthRoutes } from './routes/health.js';
-import { profileRoutes } from './routes/profile.js';
-import { LinkedInClient } from './linkedin/client.js';
-import { LinkedInProfileService } from './linkedin/service.js';
-import { registerRateLimit } from './middleware/rate-limit.js';
+import Fastify from "fastify";
+import { healthRoutes } from "./routes/health.js";
+import { profileRoutes } from "./routes/profile.js";
+import { LinkedInClient } from "./linkedin/client.js";
+import { LinkedInProfileService } from "./linkedin/service.js";
+import { registerRateLimit } from "./middleware/rate-limit.js";
 
 export function buildApp(): ReturnType<typeof Fastify> {
   const app = Fastify({ logger: true });

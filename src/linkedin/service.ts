@@ -27,12 +27,7 @@ export class LinkedInProfileService {
       `[getProfile] vieweeProfileId for "${publicIdentifier}":`,
       vieweeProfileId ?? '(not resolved — proceeding without it)',
     );
-    console.log('[getProfile] fresh session context:', {
-      applicationInstance: sessionCtx.applicationInstance ?? '(none)',
-      pageForestId: sessionCtx.pageForestId ?? '(none)',
-      pageInstanceTrackingId: sessionCtx.pageInstanceTrackingId ?? '(none)',
-      leafScreenId: sessionCtx.leafScreenId ?? '(none)',
-    });
+    // (Removed verbose session context logging to prevent confidential data leaks)
     console.log('[getProfile] htmlData:', {
       fullName: htmlData?.fullName ?? '(none)',
       headline: htmlData?.headline ?? '(none)',

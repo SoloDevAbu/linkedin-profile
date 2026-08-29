@@ -1,5 +1,9 @@
 import { env } from "../config/env.js";
-import { buildLinkedInHeaders, buildProfileContext, getCsrfToken } from "./headers.js";
+import {
+  buildLinkedInHeaders,
+  buildProfileContext,
+  getCsrfToken,
+} from "./headers.js";
 import {
   DETAIL_DEFINITIONS,
   PROFILE_COMPONENTS,
@@ -69,10 +73,6 @@ function buildProfileComponentState(
   };
 }
 
-// ---------------------------------------------------------------------------
-// Debug helpers
-// ---------------------------------------------------------------------------
-
 /** Truncate a sensitive string so we can verify it's set without leaking it. */
 function redact(value: string | undefined, prefixLen = 20): string {
   if (!value) return "[NOT SET]";
@@ -92,8 +92,6 @@ function safeHeaders(headers: Record<string, string>): Record<string, string> {
   );
 }
 
-// ---------------------------------------------------------------------------
-
 /**
  * Extract profile fields from the LinkedIn SSR HTML page.
  *
@@ -111,36 +109,50 @@ function extractHtmlProfileData(html: string): HtmlProfileData {
   let about: string | null = null;
   let imageUrl: string | null = null;
 
-  // ── 1. JSON-LD Person schema ─────────────────────────────────────────────
+  // 1. JSON-LD Person schema
   // LinkedIn embeds <script type="application/ld+json">{...}</script> blocks
   // with schema.org/Person data including name, jobTitle, address, description.
-  const jsonLdMatches = html.matchAll(/<script[^>]+type=["']application\/ld\+json["'][^>]*>([\s\S]*?)<\/script>/gi);
+  const jsonLdMatches = html.matchAll(
+    /<script[^>]+type=["']application\/ld\+json["'][^>]*>([\s\S]*?)<\/script>/gi,
+  );
   for (const block of jsonLdMatches) {
     try {
       const parsed = JSON.parse(block[1]!) as Record<string, unknown>;
       const entries: unknown[] = Array.isArray(parsed)
         ? parsed
-        : parsed['@graph'] instanceof Array
-          ? parsed['@graph'] as unknown[]
+        : parsed["@graph"] instanceof Array
+          ? (parsed["@graph"] as unknown[])
           : [parsed];
       for (const entry of entries) {
         const obj = entry as Record<string, unknown>;
-        if (obj['@type'] === 'Person' || (Array.isArray(obj['@type']) && (obj['@type'] as string[]).includes('Person'))) {
-          if (typeof obj['name'] === 'string' && !fullName) fullName = obj['name'];
-          if (typeof obj['jobTitle'] === 'string' && !headline) headline = obj['jobTitle'];
-          if (typeof obj['description'] === 'string' && !about) about = obj['description'];
-          if (obj['address'] && typeof obj['address'] === 'object') {
-            const addr = obj['address'] as Record<string, unknown>;
-            const parts = [addr['addressLocality'], addr['addressRegion'], addr['addressCountry']]
-              .filter((p): p is string => typeof p === 'string');
-            if (parts.length > 0 && !location) location = parts.join(', ');
+        if (
+          obj["@type"] === "Person" ||
+          (Array.isArray(obj["@type"]) &&
+            (obj["@type"] as string[]).includes("Person"))
+        ) {
+          if (typeof obj["name"] === "string" && !fullName)
+            fullName = obj["name"];
+          if (typeof obj["jobTitle"] === "string" && !headline)
+            headline = obj["jobTitle"];
+          if (typeof obj["description"] === "string" && !about)
+            about = obj["description"];
+          if (obj["address"] && typeof obj["address"] === "object") {
+            const addr = obj["address"] as Record<string, unknown>;
+            const parts = [
+              addr["addressLocality"],
+              addr["addressRegion"],
+              addr["addressCountry"],
+            ].filter((p): p is string => typeof p === "string");
+            if (parts.length > 0 && !location) location = parts.join(", ");
           }
-          if (obj['image'] && typeof obj['image'] === 'object') {
-            const img = obj['image'] as Record<string, unknown>;
-            if (typeof img['url'] === 'string' && !imageUrl) imageUrl = img['url'];
-            else if (typeof img['contentUrl'] === 'string' && !imageUrl) imageUrl = img['contentUrl'];
-          } else if (typeof obj['image'] === 'string' && !imageUrl) {
-            imageUrl = obj['image'];
+          if (obj["image"] && typeof obj["image"] === "object") {
+            const img = obj["image"] as Record<string, unknown>;
+            if (typeof img["url"] === "string" && !imageUrl)
+              imageUrl = img["url"];
+            else if (typeof img["contentUrl"] === "string" && !imageUrl)
+              imageUrl = img["contentUrl"];
+          } else if (typeof obj["image"] === "string" && !imageUrl) {
+            imageUrl = obj["image"];
           }
         }
       }
@@ -149,32 +161,47 @@ function extractHtmlProfileData(html: string): HtmlProfileData {
     }
   }
 
-  // ── 2. Open Graph meta tags ──────────────────────────────────────────────
+  // 2. Open Graph meta tag
   // og:title is "<Name> | LinkedIn"; strip the suffix
   if (!fullName) {
-    const ogTitle = html.match(/<meta[^>]+property=["']og:title["'][^>]+content=["']([^"']+)["']/i)
-      ?? html.match(/<meta[^>]+content=["']([^"']+)["'][^>]+property=["']og:title["']/i);
+    const ogTitle =
+      html.match(
+        /<meta[^>]+property=["']og:title["'][^>]+content=["']([^"']+)["']/i,
+      ) ??
+      html.match(
+        /<meta[^>]+content=["']([^"']+)["'][^>]+property=["']og:title["']/i,
+      );
     if (ogTitle?.[1]) {
-      fullName = ogTitle[1].replace(/\s*[|].*$/, '').trim() || null;
+      fullName = ogTitle[1].replace(/\s*[|].*$/, "").trim() || null;
     }
   }
 
   if (!headline) {
     // og:description is typically "<Name> · <Headline> · <Location>: <about snippet>"
-    const ogDesc = html.match(/<meta[^>]+property=["']og:description["'][^>]+content=["']([^"']+)["']/i)
-      ?? html.match(/<meta[^>]+content=["']([^"']+)["'][^>]+property=["']og:description["']/i);
+    const ogDesc =
+      html.match(
+        /<meta[^>]+property=["']og:description["'][^>]+content=["']([^"']+)["']/i,
+      ) ??
+      html.match(
+        /<meta[^>]+content=["']([^"']+)["'][^>]+property=["']og:description["']/i,
+      );
     if (ogDesc?.[1]) {
       // Format: "Name · Headline · Location: About..."
       // Split on interpunct (·) or bullet (•) to isolate fields
-      const decoded = ogDesc[1].replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>')
-        .replace(/&#x27;/g, "'").replace(/&quot;/g, '"');
+      const decoded = ogDesc[1]
+        .replace(/&amp;/g, "&")
+        .replace(/&lt;/g, "<")
+        .replace(/&gt;/g, ">")
+        .replace(/&#x27;/g, "'")
+        .replace(/&quot;/g, '"');
       const parts = decoded.split(/\s*[·•]\s*/);
       if (parts.length >= 2 && !headline) headline = parts[1]?.trim() || null;
       if (parts.length >= 3 && !location) {
         // "Location: about snippet..." — take the location part before the colon
-        const locPart = parts[2]?.trim() ?? '';
-        const colonIdx = locPart.indexOf(':');
-        location = (colonIdx > 0 ? locPart.slice(0, colonIdx).trim() : locPart) || null;
+        const locPart = parts[2]?.trim() ?? "";
+        const colonIdx = locPart.indexOf(":");
+        location =
+          (colonIdx > 0 ? locPart.slice(0, colonIdx).trim() : locPart) || null;
       }
     }
   }
@@ -182,49 +209,71 @@ function extractHtmlProfileData(html: string): HtmlProfileData {
   // og:image for profile photo — prefer displayphoto over background image
   if (!imageUrl) {
     // Try og:image first (always a profile photo)
-    const ogImg = html.match(/<meta[^>]+property=["']og:image["'][^>]+content=["']([^"']+)["']/i)
-      ?? html.match(/<meta[^>]+content=["']([^"']+)["'][^>]+property=["']og:image["']/i);
-    if (ogImg?.[1]) imageUrl = ogImg[1].replace(/&amp;/g, '&');
+    const ogImg =
+      html.match(
+        /<meta[^>]+property=["']og:image["'][^>]+content=["']([^"']+)["']/i,
+      ) ??
+      html.match(
+        /<meta[^>]+content=["']([^"']+)["'][^>]+property=["']og:image["']/i,
+      );
+    if (ogImg?.[1]) imageUrl = ogImg[1].replace(/&amp;/g, "&");
   }
 
-  // ── 3. HTML <title> tag ──────────────────────────────────────────────────
+  // 3. HTML <title> tag
   if (!fullName) {
     const titleMatch = html.match(/<title[^>]*>([^<]+)<\/title>/i);
     if (titleMatch?.[1]) {
       const raw = titleMatch[1].trim();
-      // LinkedIn title: "Gaurav Das | LinkedIn" or "Gaurav Das - Software Engineer - ..."
-      fullName = raw.replace(/\s*[-|].*$/, '').trim() || null;
+      fullName = raw.replace(/\s*[-|].*$/, "").trim() || null;
     }
   }
 
-  // ── 4. <link rel="preload" imageSrcSet> for the profile photo ────────────
+  // 4. <link rel="preload" imageSrcSet> for the profile photo
   // LinkedIn preloads the profile image with an imageSrcSet attribute.
   // IMPORTANT: match ONLY profile-displayphoto URLs — the background banner
   // image (profile-displaybackgroundimage) may appear first and must be skipped.
   if (!imageUrl) {
     // Scan all preload links and pick the first one containing 'profile-displayphoto'
-    const preloadRe = /<link[^>]+rel=["']preload["'][^>]+as=["']image["'][^>]+imageSrcSet=["']([^"']+)["']/gi;
+    const preloadRe =
+      /<link[^>]+rel=["']preload["'][^>]+as=["']image["'][^>]+imageSrcSet=["']([^"']+)["']/gi;
     for (const m of html.matchAll(preloadRe)) {
-      if (m[1]?.includes('profile-displayphoto')) {
-        const firstSrc = m[1].split(',')[0]?.trim().split(/\s+/)[0];
-        if (firstSrc) { imageUrl = firstSrc.replace(/&amp;/g, '&'); break; }
+      if (m[1]?.includes("profile-displayphoto")) {
+        const firstSrc = m[1].split(",")[0]?.trim().split(/\s+/)[0];
+        if (firstSrc) {
+          imageUrl = firstSrc.replace(/&amp;/g, "&");
+          break;
+        }
       }
     }
   }
 
-  // ── 5. <meta name="description"> ─────────────────────────────────────────
+  // 5. <meta name="description">
   if (!headline) {
-    const metaDesc = html.match(/<meta[^>]+name=["']description["'][^>]+content=["']([^"']+)["']/i)
-      ?? html.match(/<meta[^>]+content=["']([^"']+)["'][^>]+name=["']description["']/i);
+    const metaDesc =
+      html.match(
+        /<meta[^>]+name=["']description["'][^>]+content=["']([^"']+)["']/i,
+      ) ??
+      html.match(
+        /<meta[^>]+content=["']([^"']+)["'][^>]+name=["']description["']/i,
+      );
     if (metaDesc?.[1]) {
-      const decoded = metaDesc[1].replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>')
-        .replace(/&#x27;/g, "'").replace(/&quot;/g, '"');
+      const decoded = metaDesc[1]
+        .replace(/&amp;/g, "&")
+        .replace(/&lt;/g, "<")
+        .replace(/&gt;/g, ">")
+        .replace(/&#x27;/g, "'")
+        .replace(/&quot;/g, '"');
       const parts = decoded.split(/\s*[·•]\s*/);
       if (parts.length >= 2 && !headline) headline = parts[1]?.trim() || null;
     }
   }
 
-  console.log('[extractHtmlProfileData] extracted:', { fullName, headline, location, imageUrl: imageUrl?.slice(0, 60) });
+  console.log("[extractHtmlProfileData] extracted:", {
+    fullName,
+    headline,
+    location,
+    imageUrl: imageUrl?.slice(0, 60),
+  });
   return { fullName, headline, location, about, imageUrl };
 }
 
@@ -252,7 +301,7 @@ export interface ComponentOptions {
    * - `'simple'`: Lightweight payload `{isSelfView, vanityName}` with screenId=home.Home.
    *   Required by profileCardsActivity (HAR entry 1).
    */
-  payloadStyle?: 'full' | 'simple';
+  payloadStyle?: "full" | "simple";
   /** Fresh page-session context from the profile page GET response. */
   pageContext?: {
     applicationInstance?: string;
@@ -292,11 +341,11 @@ export interface HtmlProfileData {
  */
 export interface PageContext {
   profileId?: string;
-  applicationInstance?: string;  // x-li-application-instance
-  pageForestId?: string;         // x-li-initialpageforestid
+  applicationInstance?: string; // x-li-application-instance
+  pageForestId?: string; // x-li-initialpageforestid
   pageInstanceTrackingId?: string; // x-li-page-instance-tracking-id
-  leafScreenId?: string;         // x-li-leaf-screen-id
-  appVersion?: string;           // x-li-application-version
+  leafScreenId?: string; // x-li-leaf-screen-id
+  appVersion?: string; // x-li-application-version
   /** Profile fields mined from the SSR HTML response body. */
   htmlData?: HtmlProfileData;
 }
@@ -312,8 +361,8 @@ export class LinkedInClient {
   private validateAuth(): void {
     if (!env.LINKEDIN_COOKIE) {
       throw new Error(
-        'LINKEDIN_COOKIE is not configured. ' +
-        'Add your authenticated LinkedIn browser cookie to .env'
+        "LINKEDIN_COOKIE is not configured. " +
+          "Add your authenticated LinkedIn browser cookie to .env",
       );
     }
     // Will throw with 'JSESSIONID not found in LINKEDIN_COOKIE' if absent
@@ -327,46 +376,25 @@ export class LinkedInClient {
   ): Promise<Response> {
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), this.timeoutMs);
-
-    // ── DEBUG: log outgoing request ────────────────────────────────────────
-    console.log("\n========== [LinkedIn Outgoing Request] ==========");
-    console.log("  Method     :", init.method ?? "GET");
-    console.log("  URL        :", url);
-    console.log("  Route URL  :", routeUrl);
-    console.log(
-      "  Headers    :",
-      JSON.stringify(
-        safeHeaders((init.headers ?? {}) as Record<string, string>),
-        null,
-        4,
-      ),
-    );
-    if (init.body) {
-      try {
-        const parsed = JSON.parse(init.body as string);
-        console.log("  Body       :", JSON.stringify(parsed, null, 4));
-      } catch {
-        console.log("  Body (raw) :", init.body);
-      }
-    }
-    console.log("=================================================\n");
-    // ──────────────────────────────────────────────────────────────────────
-
     try {
       const response = await fetch(url, { ...init, signal: controller.signal });
 
-      // ── DEBUG: log response status ────────────────────────────────────
+      // DEBUG: log response status
       console.log(
         `[LinkedIn Response] ${response.status} ${response.statusText} <- ${url}`,
       );
-      // ────────────────────────────────────────────────────────────────
 
       if (!response.ok) {
         // Log response headers & body for diagnosis
-        console.log('[LinkedIn Error] response headers:');
+        console.log("[LinkedIn Error] response headers:");
         response.headers.forEach((v, k) => console.log(`  ${k}: ${v}`));
-        const errText = await response.text().catch(() => '(could not read body)');
-        console.log('[LinkedIn Error] body (first 500 chars):', errText.slice(0, 500));
+        const errText = await response
+          .text()
+          .catch(() => "(could not read body)");
+        console.log(
+          "[LinkedIn Error] body (first 500 chars):",
+          errText.slice(0, 500),
+        );
         throw new LinkedInHttpError(
           `LinkedIn returned HTTP ${response.status}`,
           response.status,
@@ -398,152 +426,175 @@ export class LinkedInClient {
     console.log(`[resolveProfileId] GET ${profileUrl}`);
 
     const headers: Record<string, string> = {
-      accept: 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8',
-      'accept-encoding': 'gzip, deflate, br',
-      'accept-language': 'en,en-IN;q=0.9,hi;q=0.8',
-      'cache-control': 'no-cache',
-      pragma: 'no-cache',
-      'sec-fetch-dest': 'document',
-      'sec-fetch-mode': 'navigate',
-      'sec-fetch-site': 'none',
-      'sec-fetch-user': '?1',
-      'upgrade-insecure-requests': '1',
-      'user-agent': env.LINKEDIN_USER_AGENT,
+      accept:
+        "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
+      "accept-encoding": "gzip, deflate, br",
+      "accept-language": "en,en-IN;q=0.9,hi;q=0.8",
+      "cache-control": "no-cache",
+      pragma: "no-cache",
+      "sec-fetch-dest": "document",
+      "sec-fetch-mode": "navigate",
+      "sec-fetch-site": "none",
+      "sec-fetch-user": "?1",
+      "upgrade-insecure-requests": "1",
+      "user-agent": env.LINKEDIN_USER_AGENT,
     };
     if (env.LINKEDIN_COOKIE) headers.cookie = env.LINKEDIN_COOKIE;
-    if (env.LINKEDIN_CSRF_TOKEN) headers['csrf-token'] = env.LINKEDIN_CSRF_TOKEN;
+    if (env.LINKEDIN_CSRF_TOKEN)
+      headers["csrf-token"] = env.LINKEDIN_CSRF_TOKEN;
 
     try {
       const controller = new AbortController();
       const timeout = setTimeout(() => controller.abort(), this.timeoutMs);
       let res: Response;
       try {
-        res = await fetch(profileUrl, { method: 'GET', headers, signal: controller.signal });
+        res = await fetch(profileUrl, {
+          method: "GET",
+          headers,
+          signal: controller.signal,
+        });
       } finally {
         clearTimeout(timeout);
       }
 
-      const ct = res.headers.get('content-type') ?? '(none)';
-      console.log(`[resolveProfileId] status=${res.status}  content-type=${ct}`);
+      const ct = res.headers.get("content-type") ?? "(none)";
+      console.log(
+        `[resolveProfileId] status=${res.status}  content-type=${ct}`,
+      );
 
-      // ── Extract fresh page-session context from response headers ──────────
+      // Extract fresh page-session context from response headers
       // LinkedIn sends these on every SSR page load. They MUST be used
       // verbatim in SDUI requests — stale .env values cause HTTP 500.
-      const appInstance   = res.headers.get('x-li-application-instance')   ?? undefined;
-      const pageForestId  = res.headers.get('x-li-initialpageforestid')    ?? undefined; // note: 'initial' prefix
-      const trackingId    = res.headers.get('x-li-page-instance-tracking-id') ?? undefined;
-      const leafScreenId  = res.headers.get('x-li-leaf-screen-id')         ?? undefined;
-      const appVersion    = res.headers.get('x-li-application-version')    ?? undefined;
-
-      console.log('[resolveProfileId] page context from response headers:');
-      console.log('  x-li-application-instance         :', appInstance     ?? '(none)');
-      console.log('  x-li-initialpageforestid           :', pageForestId   ?? '(none)');
-      console.log('  x-li-page-instance-tracking-id    :', trackingId      ?? '(none)');
-      console.log('  x-li-leaf-screen-id                :', leafScreenId   ?? '(none)');
-      console.log('  x-li-application-version           :', appVersion     ?? '(none)');
-
-      // Log all response headers so we can see if LinkedIn returns page-context values
-      console.log('[resolveProfileId] response headers:');
-      res.headers.forEach((value, key) => {
-        const safe = ['set-cookie', 'authorization'].includes(key.toLowerCase())
-          ? '[REDACTED]'
-          : value;
-        console.log(`  ${key}: ${safe}`);
-      });
+      const appInstance =
+        res.headers.get("x-li-application-instance") ?? undefined;
+      const pageForestId =
+        res.headers.get("x-li-initialpageforestid") ?? undefined;
+      const trackingId =
+        res.headers.get("x-li-page-instance-tracking-id") ?? undefined;
+      const leafScreenId = res.headers.get("x-li-leaf-screen-id") ?? undefined;
+      const appVersion =
+        res.headers.get("x-li-application-version") ?? undefined;
 
       if (!res.ok) {
-        console.warn(`[resolveProfileId] GET failed ${res.status} — session may be expired`);
+        console.warn(
+          `[resolveProfileId] GET failed ${res.status} — session may be expired`,
+        );
         return {};
       }
 
       const bytes = new Uint8Array(await res.arrayBuffer());
-      const text = new TextDecoder('utf-8', { fatal: false }).decode(bytes);
-      console.log('[resolveProfileId] response length: ', text.length, 'chars');
+      const text = new TextDecoder("utf-8", { fatal: false }).decode(bytes);
+      console.log("[resolveProfileId] response length: ", text.length, "chars");
       // Log two snippets: the start (meta/RSC) and a section likely to contain entityUrn
-      console.log('[resolveProfileId] SNIPPET (start):', text.slice(0, 400).replace(/\n+/g, ' '));
-      const urnIdx = text.indexOf('fsd_profile');
+      console.log(
+        "[resolveProfileId] SNIPPET (start):",
+        text.slice(0, 400).replace(/\n+/g, " "),
+      );
+      const urnIdx = text.indexOf("fsd_profile");
       if (urnIdx !== -1) {
-        console.log('[resolveProfileId] SNIPPET (fsd_profile):', text.slice(Math.max(0, urnIdx - 20), urnIdx + 80));
+        console.log(
+          "[resolveProfileId] SNIPPET (fsd_profile):",
+          text.slice(Math.max(0, urnIdx - 20), urnIdx + 80),
+        );
       } else {
-        console.log('[resolveProfileId] NOTE: "fsd_profile" not found in page — checking alternative patterns');
+        console.log(
+          '[resolveProfileId] NOTE: "fsd_profile" not found in page — checking alternative patterns',
+        );
       }
 
-      // ── HTML profile data ─────────────────────────────────────────────────
+      // HTML profile data
       // Extract name/headline/location/image from the SSR page while we have it.
-      // This is more reliable than RSC component parsing for top-card fields.
       const htmlData = extractHtmlProfileData(text);
 
-      // ── Pattern matching order (most specific → least specific) ─────────────────
+      // Pattern matching order (most specific → least specific)
       const ctx = (profileId: string): PageContext => ({
         profileId,
         htmlData,
-        ...(appInstance      ? { applicationInstance:       appInstance  } : {}),
-        ...(pageForestId     ? { pageForestId:              pageForestId } : {}),
-        ...(trackingId       ? { pageInstanceTrackingId:   trackingId   } : {}),
-        ...(leafScreenId     ? { leafScreenId:              leafScreenId } : {}),
-        ...(appVersion       ? { appVersion:                appVersion   } : {}),
+        ...(appInstance ? { applicationInstance: appInstance } : {}),
+        ...(pageForestId ? { pageForestId: pageForestId } : {}),
+        ...(trackingId ? { pageInstanceTrackingId: trackingId } : {}),
+        ...(leafScreenId ? { leafScreenId: leafScreenId } : {}),
+        ...(appVersion ? { appVersion: appVersion } : {}),
       });
 
       // Pattern 1a: JSON entityUrn — "entityUrn":"urn:li:fsd_profile:ID"
       let m = text.match(/\"entityUrn\"\s*:\s*\"(urn:li:fsd_profile:[^\"]+)\"/);
       if (m?.[1]) {
-        const id = m[1].replace('urn:li:fsd_profile:', '');
-        console.log(`[resolveProfileId] ✓ P1a (entityUrn JSON): ${id.slice(0, 12)}… (${id.length} chars)`);
+        const id = m[1].replace("urn:li:fsd_profile:", "");
+        console.log(
+          `[resolveProfileId] ✓ P1a (entityUrn JSON): ${id.slice(0, 12)}… (${id.length} chars)`,
+        );
         return ctx(id);
       }
 
       // Pattern 1b: URL-encoded entityUrn — entityUrn%22%3A%22urn%3Ali%3Afsd_profile%3AID
-      m = text.match(/entityUrn(?:%22%3A%22|"\s*:\s*")urn(?:%3A|:)li(?:%3A|:)fsd_profile(?:%3A|:)([A-Za-z0-9+/=_-]{20,}?)(?=[%&"'\s])/);
+      m = text.match(
+        /entityUrn(?:%22%3A%22|"\s*:\s*")urn(?:%3A|:)li(?:%3A|:)fsd_profile(?:%3A|:)([A-Za-z0-9+/=_-]{20,}?)(?=[%&"'\s])/,
+      );
       if (m?.[1]) {
         const id = decodeURIComponent(m[1]);
-        console.log(`[resolveProfileId] ✓ P1b (entityUrn URL-enc): ${id.slice(0, 12)}… (${id.length} chars)`);
+        console.log(
+          `[resolveProfileId] ✓ P1b (entityUrn URL-enc): ${id.slice(0, 12)}… (${id.length} chars)`,
+        );
         return ctx(id);
       }
 
       // Pattern 3: URL-encoded fsd_profile URN (e.g. in image media URLs on the page).
       // Uses a precise boundary: &, ", ', or whitespace — avoids overcapturing.
       // Run BEFORE P2 (RSC greedy) which overcaptures by 7+ chars on long IDs.
-      m = text.match(/fsd_profile(?:%3A|:)([A-Za-z0-9+/=_-]{20,}?)(?=[&"'\s%])/);
+      m = text.match(
+        /fsd_profile(?:%3A|:)([A-Za-z0-9+/=_-]{20,}?)(?=[&"'\s%])/,
+      );
       if (m?.[1]) {
         const id = decodeURIComponent(m[1]);
-        console.log(`[resolveProfileId] ✓ P3 (URL-encoded): ${id.slice(0, 12)}… (${id.length} chars)`);
+        console.log(
+          `[resolveProfileId] ✓ P3 (URL-encoded): ${id.slice(0, 12)}… (${id.length} chars)`,
+        );
         return ctx(id);
       }
 
       // Pattern 4: vieweeProfileId field in embedded JSON
       m = text.match(/\"vieweeProfileId\"\s*:\s*\"([^\"]{10,})\"/);
       if (m?.[1]) {
-        console.log(`[resolveProfileId] ✓ P4 (vieweeProfileId): ${m[1].slice(0, 12)}… (${m[1].length} chars)`);
+        console.log(
+          `[resolveProfileId] ✓ P4 (vieweeProfileId): ${m[1].slice(0, 12)}… (${m[1].length} chars)`,
+        );
         return ctx(m[1]);
       }
 
       // Pattern 2 (LAST RESORT): RSC component key — can overcapture.
-      m = text.match(/\.profile\.card\.ref([A-Za-z0-9+/=_-]{20,})(?=[^A-Za-z0-9+/=_-])/);
+      m = text.match(
+        /\.profile\.card\.ref([A-Za-z0-9+/=_-]{20,})(?=[^A-Za-z0-9+/=_-])/,
+      );
       if (m?.[1]) {
-        console.log(`[resolveProfileId] ✓ P2 (RSC key, last resort): ${m[1].slice(0, 12)}… (${m[1].length} chars)`);
+        console.log(
+          `[resolveProfileId] ✓ P2 (RSC key, last resort): ${m[1].slice(0, 12)}… (${m[1].length} chars)`,
+        );
         return ctx(m[1]);
       }
 
-      console.warn('[resolveProfileId] No profileId pattern matched — using session context only');
+      console.warn(
+        "[resolveProfileId] No profileId pattern matched — using session context only",
+      );
       return {
         htmlData,
-        ...(appInstance  ? { applicationInstance:     appInstance  } : {}),
-        ...(pageForestId ? { pageForestId:            pageForestId } : {}),
-        ...(trackingId   ? { pageInstanceTrackingId: trackingId   } : {}),
-        ...(leafScreenId ? { leafScreenId:            leafScreenId } : {}),
-        ...(appVersion   ? { appVersion:              appVersion   } : {}),
+        ...(appInstance ? { applicationInstance: appInstance } : {}),
+        ...(pageForestId ? { pageForestId: pageForestId } : {}),
+        ...(trackingId ? { pageInstanceTrackingId: trackingId } : {}),
+        ...(leafScreenId ? { leafScreenId: leafScreenId } : {}),
+        ...(appVersion ? { appVersion: appVersion } : {}),
       };
-
     } catch (err) {
-      console.warn('[resolveProfileId] GET threw:', err instanceof Error ? err.message : err);
+      console.warn(
+        "[resolveProfileId] GET threw:",
+        err instanceof Error ? err.message : err,
+      );
       return {};
     }
   }
 
-
-
   async fetchComponent(options: ComponentOptions): Promise<RscResponse> {
-    // ── M1: Pre-flight auth validation ────────────────────────────────────
+    // M1: Pre-flight auth validation
     this.validateAuth();
 
     const sduiid = options.sduiid ?? options.componentId;
@@ -556,76 +607,54 @@ export class LinkedInClient {
     const routeUrl = profilePath(options.publicIdentifier);
 
     const url = `${LINKEDIN_BASE}/flagship-web/rsc-action/actions/component?${query.toString()}`;
-    const body = options.payloadStyle === 'simple'
-      ? {
-          clientArguments: {
-            payload: {
-              isSelfView: false,
-              vanityName: options.publicIdentifier,
-            },
-            states: [],
-            requestMetadata: { $type: 'proto.sdui.common.RequestMetadata' },
-            screenId: 'com.linkedin.sdui.flagshipnav.home.Home',
-            knownTemplateIds: [],
-          },
-        }
-      : {
-          clientArguments: {
-            payload: {
-              isSelfView: false,
-              vanityName: options.publicIdentifier,
-              // Always send replaceableSectionArgs — required by LinkedIn SDUI server.
-              // vieweeProfileId is the LinkedIn member URN; omit if unknown (server may 500 without it).
-              replaceableSectionArgs: {
-                vanityName: options.publicIdentifier,
-                hideCardsForGoldenGate: false,
-                shouldSetupReplaceableComponent: true,
-                ...(options.profileId
-                  ? { vieweeProfileId: options.profileId }
-                  : {}),
+    const body =
+      options.payloadStyle === "simple"
+        ? {
+            clientArguments: {
+              payload: {
                 isSelfView: false,
-                isSelfViewResolved: false,
+                vanityName: options.publicIdentifier,
               },
-              // profileComponentState is required by the SDUI server for component state tracking.
-              profileComponentState: buildProfileComponentState(
-                options.publicIdentifier,
-              ),
+              states: [],
+              requestMetadata: { $type: "proto.sdui.common.RequestMetadata" },
+              screenId: "com.linkedin.sdui.flagshipnav.home.Home",
+              knownTemplateIds: [],
             },
-            states: [],
-            requestMetadata: { $type: 'proto.sdui.common.RequestMetadata' },
-            screenId: 'com.linkedin.sdui.flagshipnav.profile.Profile',
-            knownTemplateIds: [],
-          },
-        };
+          }
+        : {
+            clientArguments: {
+              payload: {
+                isSelfView: false,
+                vanityName: options.publicIdentifier,
+                // Always send replaceableSectionArgs — required by LinkedIn SDUI server.
+                // vieweeProfileId is the LinkedIn member URN; omit if unknown (server may 500 without it).
+                replaceableSectionArgs: {
+                  vanityName: options.publicIdentifier,
+                  hideCardsForGoldenGate: false,
+                  shouldSetupReplaceableComponent: true,
+                  ...(options.profileId
+                    ? { vieweeProfileId: options.profileId }
+                    : {}),
+                  isSelfView: false,
+                  isSelfViewResolved: false,
+                },
+                // profileComponentState is required by the SDUI server for component state tracking.
+                profileComponentState: buildProfileComponentState(
+                  options.publicIdentifier,
+                ),
+              },
+              states: [],
+              requestMetadata: { $type: "proto.sdui.common.RequestMetadata" },
+              screenId: "com.linkedin.sdui.flagshipnav.profile.Profile",
+              knownTemplateIds: [],
+            },
+          };
 
     const headers = buildLinkedInHeaders(
       buildProfileContext(options.publicIdentifier, routeUrl, {
-        // Spread spreads only the keys that exist on pageContext — satisfies
-        // exactOptionalPropertyTypes (no explicit `undefined` assignments).
         ...options.pageContext,
       }),
     );
-
-    // ── M1: Structured pre-flight log (spec §14) — no secret values ───────
-    console.log("\n[LinkedIn Request]");
-    console.log("  method              :", "POST");
-    console.log("  url                 :", url);
-    console.log("  routeUrl            :", routeUrl);
-    console.log("  componentId         :", options.componentId);
-    console.log("  publicIdentifier    :", options.publicIdentifier);
-    console.log("  profileId           :", options.profileId ?? "(none)");
-    console.log("  applicationVersion  :", env.LINKEDIN_APP_VERSION);
-    console.log("  sduiVersion         :", env.LINKEDIN_SDUI_VERSION);
-    console.log("  hasCookie           :", Boolean(headers["cookie"]));
-    console.log("  hasCsrfToken        :", Boolean(headers["csrf-token"]));
-    console.log("  hasApplicationInstance:", Boolean(headers["x-li-application-instance"]));
-    console.log("  hasPageInstance     :", Boolean(headers["x-li-page-instance"]));
-    console.log("  hasPageForestId     :", Boolean(headers["x-li-pageforestid"]));
-    console.log("  hasTrackingId       :", Boolean(headers["x-li-page-instance-tracking-id"]));
-    console.log("  bodyKeys            :", Object.keys(body));
-    console.log("");
-    // ────────────────────────────────────────────────────────────────────────
-
     const response = await this.request(
       url,
       { method: "POST", headers, body: JSON.stringify(body) },

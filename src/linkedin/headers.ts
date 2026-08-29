@@ -5,18 +5,14 @@ import { randomBytes } from "crypto";
 export interface HeaderContext {
   initialUrl: string;
   routeUrl: string;
-  // Optional fresh values from the profile page GET response.
-  // When present, these override the corresponding stale .env values.
   pageInstance?: string;
   pageInstanceTrackingId?: string;
   freshApplicationInstance?: string; // x-li-application-instance from GET response
-  freshPageForestId?: string;        // x-li-initialpageforestid from GET response
-  freshAppVersion?: string;          // x-li-application-version from GET response
+  freshPageForestId?: string; // x-li-initialpageforestid from GET response
+  freshAppVersion?: string; // x-li-application-version from GET response
 }
 
-// ---------------------------------------------------------------------------
 // Auth helpers
-// ---------------------------------------------------------------------------
 
 /**
  * Derive the CSRF token from the JSESSIONID cookie value.
@@ -28,7 +24,6 @@ export interface HeaderContext {
  * a guaranteed-invalid request.
  */
 export function getCsrfToken(cookie: string): string {
-  // Match optional surrounding quotes; the value itself starts with "ajax:"
   const match = cookie.match(/(?:^|;\s*)JSESSIONID="?([^";]+)"?/i);
   if (!match?.[1]) {
     throw new Error("JSESSIONID not found in LINKEDIN_COOKIE");
@@ -36,9 +31,7 @@ export function getCsrfToken(cookie: string): string {
   return match[1]; // e.g. "ajax:1234567890"  — already has the prefix
 }
 
-// ---------------------------------------------------------------------------
 // Telemetry helpers
-// ---------------------------------------------------------------------------
 
 /**
  * Generate a W3C-style traceparent header.
@@ -66,9 +59,7 @@ function traceStateFromTraceparent(traceparent: string): string {
   return `LinkedIn=${parentId}`;
 }
 
-// ---------------------------------------------------------------------------
 // Header builder
-// ---------------------------------------------------------------------------
 
 export function buildLinkedInHeaders(
   context: HeaderContext,
@@ -81,41 +72,32 @@ export function buildLinkedInHeaders(
 
   const headers: Record<string, string> = {};
 
-  // ── Static / Application ──────────────────────────────────────────────────
-  // Prefer the fresh version extracted from the GET response; fall back to env.
+  // Static / Application
   const appVersion = context.freshAppVersion ?? env.LINKEDIN_APP_VERSION;
   headers["user-agent"] = env.LINKEDIN_USER_AGENT;
   headers["x-li-application-version"] = appVersion;
-  // x-li-sdui-version is intentionally NOT set — HAR confirms the browser
-  // does not send this header for SDUI component requests.
   headers["x-li-rsc-stream"] = "true";
   headers["x-li-anchor-page-key"] = env.LINKEDIN_ANCHOR_PAGE_KEY;
 
-  // ── Standard fetch headers ────────────────────────────────────────────────
+  // Standard fetch headers
   headers["accept"] = "*/*";
   headers["accept-encoding"] = "gzip, deflate, br, zstd";
   headers["accept-language"] = "en,en-IN;q=0.9,hi;q=0.8";
   headers["content-type"] = "application/json";
-  // Note: x-li-sdui-version is intentionally absent — HAR confirms it is not
-  // sent by the browser for any of the SDUI component requests.
   headers["priority"] = "u=1, i";
   headers["sec-ch-prefers-color-scheme"] = "dark";
-  // HAR-exact format: "Not=A?Brand";v="99", "Google Chrome";v="<N>", "Chromium";v="<N>"
-  headers["sec-ch-ua"] = `"Not=A?Brand";v="99", "Google Chrome";v="${chromeVer}", "Chromium";v="${chromeVer}"`;
+  headers["sec-ch-ua"] =
+    `"Not=A?Brand";v="99", "Google Chrome";v="${chromeVer}", "Chromium";v="${chromeVer}"`;
   headers["sec-ch-ua-mobile"] = "?0";
   headers["sec-ch-ua-platform"] = '"Windows"';
   headers["sec-fetch-dest"] = "empty";
   headers["sec-fetch-mode"] = "cors";
   headers["sec-fetch-site"] = "same-origin";
 
-  // ── Session ───────────────────────────────────────────────────────────────
-  // cookie and csrf-token are session-bound; never log their values.
+  // Session
   if (env.LINKEDIN_COOKIE) {
     headers["cookie"] = env.LINKEDIN_COOKIE;
   }
-  // Prefer explicit env override; otherwise derive from JSESSIONID in cookie.
-  // getCsrfToken() is intentionally NOT called here — caller (client.ts) must
-  // call validateAuth() first which surfaces a clear error message.
   const csrf =
     env.LINKEDIN_CSRF_TOKEN ||
     (env.LINKEDIN_COOKIE
@@ -129,18 +111,16 @@ export function buildLinkedInHeaders(
       : undefined);
   if (csrf) headers["csrf-token"] = csrf;
 
-  // ── Page Context ──────────────────────────────────────────────────────────
-  // Prefer fresh values extracted from the latest profile page GET response.
-  // Fall back to .env values which may be stale.
-  const appInstance = context.freshApplicationInstance ?? env.LINKEDIN_APPLICATION_INSTANCE;
+  // Page Context
+  const appInstance =
+    context.freshApplicationInstance ?? env.LINKEDIN_APPLICATION_INSTANCE;
   const pageForestId = context.freshPageForestId ?? env.LINKEDIN_PAGE_FOREST_ID;
 
   if (appInstance) headers["x-li-application-instance"] = appInstance;
   if (pageForestId) headers["x-li-pageforestid"] = pageForestId;
 
-  const trackingId = context.pageInstanceTrackingId ?? env.LINKEDIN_PAGE_INSTANCE_TRACKING_ID;
-  // Synthesize x-li-page-instance from anchorPageKey + trackingId if not explicitly provided.
-  // HAR format: "urn:li:page:d_flagship3_profile_view_base;<trackingId>"
+  const trackingId =
+    context.pageInstanceTrackingId ?? env.LINKEDIN_PAGE_INSTANCE_TRACKING_ID;
   const pageInstance =
     context.pageInstance ??
     env.LINKEDIN_PAGE_INSTANCE ??
@@ -150,16 +130,11 @@ export function buildLinkedInHeaders(
   if (pageInstance) headers["x-li-page-instance"] = pageInstance;
   if (trackingId) headers["x-li-page-instance-tracking-id"] = trackingId;
 
-  // ── Request Context ───────────────────────────────────────────────────────
+  // Request Context
   headers["origin"] = LINKEDIN_ORIGIN;
   headers["referer"] = `${LINKEDIN_ORIGIN}${context.initialUrl}`;
-  // NOTE: x-li-initial-url and x-li-route-url are intentionally NOT set.
-  // HAR analysis of 13 successful SDUI requests confirms the browser never
-  // sends these headers for /flagship-web/rsc-action/actions/component.
 
-  // ── Telemetry ─────────────────────────────────────────────────────────────
-  // x-li-traceparent traceId MUST equal x-li-pageforestid (HAR-confirmed).
-  // Use the fresh pageForestId (from GET response) so traceId stays coherent.
+  // Telemetry
   const traceparent = generateTraceparent(pageForestId || undefined);
   headers["x-li-traceparent"] = traceparent;
   headers["x-li-tracestate"] = traceStateFromTraceparent(traceparent);
@@ -182,14 +157,25 @@ export function buildLinkedInHeaders(
 export function buildProfileContext(
   publicIdentifier: string,
   routeUrl?: string,
-  freshCtx?: { applicationInstance?: string; pageForestId?: string; pageInstanceTrackingId?: string; appVersion?: string },
+  freshCtx?: {
+    applicationInstance?: string;
+    pageForestId?: string;
+    pageInstanceTrackingId?: string;
+    appVersion?: string;
+  },
 ): HeaderContext {
   return {
     initialUrl: profilePath(publicIdentifier),
     routeUrl: routeUrl ?? profilePath(publicIdentifier),
-    ...(freshCtx?.applicationInstance    ? { freshApplicationInstance: freshCtx.applicationInstance }    : {}),
-    ...(freshCtx?.pageForestId           ? { freshPageForestId:         freshCtx.pageForestId }           : {}),
-    ...(freshCtx?.pageInstanceTrackingId ? { pageInstanceTrackingId:    freshCtx.pageInstanceTrackingId } : {}),
-    ...(freshCtx?.appVersion             ? { freshAppVersion:           freshCtx.appVersion }             : {}),
+    ...(freshCtx?.applicationInstance
+      ? { freshApplicationInstance: freshCtx.applicationInstance }
+      : {}),
+    ...(freshCtx?.pageForestId
+      ? { freshPageForestId: freshCtx.pageForestId }
+      : {}),
+    ...(freshCtx?.pageInstanceTrackingId
+      ? { pageInstanceTrackingId: freshCtx.pageInstanceTrackingId }
+      : {}),
+    ...(freshCtx?.appVersion ? { freshAppVersion: freshCtx.appVersion } : {}),
   };
 }

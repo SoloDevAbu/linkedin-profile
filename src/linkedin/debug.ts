@@ -17,15 +17,15 @@ import { writeFile, mkdir } from "fs/promises";
 import { join } from "path";
 import { env } from "../config/env.js";
 import { LinkedInClient } from "./client.js";
-import { buildLinkedInHeaders, buildProfileContext, getCsrfToken } from "./headers.js";
+import {
+  buildLinkedInHeaders,
+  buildProfileContext,
+  getCsrfToken,
+} from "./headers.js";
 import { PROFILE_COMPONENTS } from "./components.js";
 
 const LINKEDIN_BASE = "https://www.linkedin.com";
 const DEBUG_DIR = join(process.cwd(), "debug");
-
-// ---------------------------------------------------------------------------
-// Internal helpers
-// ---------------------------------------------------------------------------
 
 function assertAuth(): void {
   if (!env.LINKEDIN_COOKIE) {
@@ -34,13 +34,8 @@ function assertAuth(): void {
         "Add it to .env before running this debug function.",
     );
   }
-  // Will throw with a clear message if JSESSIONID is missing
   getCsrfToken(env.LINKEDIN_COOKIE);
 }
-
-// ---------------------------------------------------------------------------
-// Public debug function
-// ---------------------------------------------------------------------------
 
 export async function debugInitialProfileRequest(
   publicIdentifier: string,
@@ -65,11 +60,11 @@ export async function debugInitialProfileRequest(
   console.log(
     `[debug] vieweeProfileId: ${vieweeProfileId ?? "(not resolved — proceeding without it)"}`,
   );
-  console.log('[debug] fresh page context:', {
-    applicationInstance: applicationInstance ?? '(none)',
-    pageForestId:        pageForestId        ?? '(none)',
-    pageInstanceTrackingId: pageInstanceTrackingId ?? '(none)',
-    appVersion:          appVersion          ?? '(none)',
+  console.log("[debug] fresh page context:", {
+    applicationInstance: applicationInstance ?? "(none)",
+    pageForestId: pageForestId ?? "(none)",
+    pageInstanceTrackingId: pageInstanceTrackingId ?? "(none)",
+    appVersion: appVersion ?? "(none)",
   });
 
   // 3. Build request parameters
@@ -107,14 +102,13 @@ export async function debugInitialProfileRequest(
     buildProfileContext(publicIdentifier, routeUrl, {
       // Conditional spreads satisfy exactOptionalPropertyTypes: keys are
       // omitted entirely when undefined, never explicitly set to undefined.
-      ...(applicationInstance    ? { applicationInstance }    : {}),
-      ...(pageForestId           ? { pageForestId }           : {}),
+      ...(applicationInstance ? { applicationInstance } : {}),
+      ...(pageForestId ? { pageForestId } : {}),
       ...(pageInstanceTrackingId ? { pageInstanceTrackingId } : {}),
-      ...(appVersion             ? { appVersion }             : {}),
+      ...(appVersion ? { appVersion } : {}),
     }),
   );
 
-  // 4. Structured pre-flight log (no secret values)
   console.log("\n[debug] Request summary:");
   console.log("  method          :", "POST");
   console.log("  url             :", url);
@@ -125,20 +119,23 @@ export async function debugInitialProfileRequest(
   console.log("  appVersion (live):", appVersion ?? env.LINKEDIN_APP_VERSION);
   console.log("  hasCookie       :", Boolean(headers["cookie"]));
   console.log("  hasCsrfToken    :", Boolean(headers["csrf-token"]));
-  console.log("  hasAppInstance  :", Boolean(headers["x-li-application-instance"]));
+  console.log(
+    "  hasAppInstance  :",
+    Boolean(headers["x-li-application-instance"]),
+  );
   console.log("  hasPageInstance :", Boolean(headers["x-li-page-instance"]));
   console.log("  hasPageForestId :", Boolean(headers["x-li-pageforestid"]));
-  console.log("  hasTrackingId   :", Boolean(headers["x-li-page-instance-tracking-id"]));
+  console.log(
+    "  hasTrackingId   :",
+    Boolean(headers["x-li-page-instance-tracking-id"]),
+  );
   console.log("  bodyKeys        :", Object.keys(body));
   console.log("  traceparent     :", headers["x-li-traceparent"]);
   console.log("");
 
   // 5. Send the request
   const controller = new AbortController();
-  const timeout = setTimeout(
-    () => controller.abort(),
-    env.REQUEST_TIMEOUT_MS,
-  );
+  const timeout = setTimeout(() => controller.abort(), env.REQUEST_TIMEOUT_MS);
 
   let response: Response;
   try {
@@ -163,27 +160,20 @@ export async function debugInitialProfileRequest(
 
   if (!response.ok) {
     console.error(
-      `\n[debug] ❌ Request failed — HTTP ${response.status}. Check headers and cookie freshness.`,
+      `\n[debug] Request failed — HTTP ${response.status}. Check headers and cookie freshness.`,
     );
-    // Try to show a snippet of the error body for debugging
     try {
       const errText = await response.text();
       console.error("[debug] Error body snippet:", errText.slice(0, 500));
-    } catch {
-      // ignore
-    }
+    } catch {}
     return;
   }
-
-  // 7. Read raw bytes
   const buffer = await response.arrayBuffer();
   const bytes = new Uint8Array(buffer);
   const text = new TextDecoder("utf-8", { fatal: false }).decode(bytes);
 
   console.log("  byte length     :", bytes.length);
   console.log("  text length     :", text.length);
-
-  // 8. Save to debug/ directory (no credentials included)
   await mkdir(DEBUG_DIR, { recursive: true });
   const binPath = join(DEBUG_DIR, "linkedin-profile-response.bin");
   const txtPath = join(DEBUG_DIR, "linkedin-profile-response.txt");
@@ -191,7 +181,7 @@ export async function debugInitialProfileRequest(
   await writeFile(binPath, bytes);
   await writeFile(txtPath, text, "utf-8");
 
-  console.log(`\n[debug] ✅ HTTP 200 — Raw response saved:`);
+  console.log(`\n[debug] HTTP 200 — Raw response saved:`);
   console.log(`  binary → ${binPath}`);
   console.log(`  text   → ${txtPath}`);
   console.log(`\n[debug] First 400 chars of decoded text:`);
