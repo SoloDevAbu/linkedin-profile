@@ -1,5 +1,5 @@
 import { env } from "../config/env.js";
-import { buildLinkedInHeaders, buildProfileContext } from "./headers.js";
+import { buildLinkedInHeaders, buildProfileContext, getCsrfToken } from "./headers.js";
 import {
   DETAIL_DEFINITIONS,
   PROFILE_COMPONENTS,
@@ -110,6 +110,13 @@ export interface ComponentOptions {
   componentId: string;
   sduiid?: string;
   profileId?: string;
+  /** Fresh page-session context from the profile page GET response. */
+  pageContext?: {
+    applicationInstance?: string;
+    pageForestId?: string;
+    pageInstanceTrackingId?: string;
+    appVersion?: string;
+  };
 }
 
 export interface PaginationOptions {
@@ -120,8 +127,39 @@ export interface PaginationOptions {
   count?: number;
 }
 
+/**
+ * Page-session context extracted from the LinkedIn profile page GET response.
+ * LinkedIn sends these as response headers on every SSR page load — they are
+ * the authoritative, fresh values for the current session and should be used
+ * verbatim in subsequent SDUI POST requests.
+ */
+export interface PageContext {
+  profileId?: string;
+  applicationInstance?: string;  // x-li-application-instance
+  pageForestId?: string;         // x-li-initialpageforestid
+  pageInstanceTrackingId?: string; // x-li-page-instance-tracking-id
+  leafScreenId?: string;         // x-li-leaf-screen-id
+  appVersion?: string;           // x-li-application-version
+}
+
 export class LinkedInClient {
   constructor(private readonly timeoutMs = env.REQUEST_TIMEOUT_MS) {}
+
+  /**
+   * Validate that auth credentials are present before making an SDUI request.
+   * Throws with a clear message so the problem is diagnosed immediately
+   * instead of sending a guaranteed-invalid request to LinkedIn.
+   */
+  private validateAuth(): void {
+    if (!env.LINKEDIN_COOKIE) {
+      throw new Error(
+        'LINKEDIN_COOKIE is not configured. ' +
+        'Add your authenticated LinkedIn browser cookie to .env'
+      );
+    }
+    // Will throw with 'JSESSIONID not found in LINKEDIN_COOKIE' if absent
+    getCsrfToken(env.LINKEDIN_COOKIE);
+  }
 
   private async request(
     url: string,
@@ -165,6 +203,11 @@ export class LinkedInClient {
       // ────────────────────────────────────────────────────────────────
 
       if (!response.ok) {
+        // Log response headers & body for diagnosis
+        console.log('[LinkedIn Error] response headers:');
+        response.headers.forEach((v, k) => console.log(`  ${k}: ${v}`));
+        const errText = await response.text().catch(() => '(could not read body)');
+        console.log('[LinkedIn Error] body (first 500 chars):', errText.slice(0, 500));
         throw new LinkedInHttpError(
           `LinkedIn returned HTTP ${response.status}`,
           response.status,
@@ -187,11 +230,11 @@ export class LinkedInClient {
   /**
    * Resolve the LinkedIn member URN (vieweeProfileId) for a given vanity name.
    *
-   * Strategy: GET the profile HTML page with browser navigation headers.
-   * LinkedIn's SSR resolves the profileId from the vanityName server-side
-   * and embeds it in the page. We extract it using multiple patterns.
+   * Also extracts the fresh page-session context headers that LinkedIn returns
+   * on every SSR page load. These MUST be used in subsequent SDUI requests —
+   * stale values from .env cause 500 errors.
    */
-  async resolveProfileId(vanityName: string): Promise<string | undefined> {
+  async resolveProfileId(vanityName: string): Promise<PageContext> {
     const profileUrl = `${LINKEDIN_BASE}/in/${encodeURIComponent(vanityName)}/`;
     console.log(`[resolveProfileId] GET ${profileUrl}`);
 
@@ -224,58 +267,119 @@ export class LinkedInClient {
       const ct = res.headers.get('content-type') ?? '(none)';
       console.log(`[resolveProfileId] status=${res.status}  content-type=${ct}`);
 
+      // ── Extract fresh page-session context from response headers ──────────
+      // LinkedIn sends these on every SSR page load. They MUST be used
+      // verbatim in SDUI requests — stale .env values cause HTTP 500.
+      const appInstance   = res.headers.get('x-li-application-instance')   ?? undefined;
+      const pageForestId  = res.headers.get('x-li-initialpageforestid')    ?? undefined; // note: 'initial' prefix
+      const trackingId    = res.headers.get('x-li-page-instance-tracking-id') ?? undefined;
+      const leafScreenId  = res.headers.get('x-li-leaf-screen-id')         ?? undefined;
+      const appVersion    = res.headers.get('x-li-application-version')    ?? undefined;
+
+      console.log('[resolveProfileId] page context from response headers:');
+      console.log('  x-li-application-instance         :', appInstance     ?? '(none)');
+      console.log('  x-li-initialpageforestid           :', pageForestId   ?? '(none)');
+      console.log('  x-li-page-instance-tracking-id    :', trackingId      ?? '(none)');
+      console.log('  x-li-leaf-screen-id                :', leafScreenId   ?? '(none)');
+      console.log('  x-li-application-version           :', appVersion     ?? '(none)');
+
+      // Log all response headers so we can see if LinkedIn returns page-context values
+      console.log('[resolveProfileId] response headers:');
+      res.headers.forEach((value, key) => {
+        const safe = ['set-cookie', 'authorization'].includes(key.toLowerCase())
+          ? '[REDACTED]'
+          : value;
+        console.log(`  ${key}: ${safe}`);
+      });
+
       if (!res.ok) {
         console.warn(`[resolveProfileId] GET failed ${res.status} — session may be expired`);
-        return undefined;
+        return {};
       }
 
       const bytes = new Uint8Array(await res.arrayBuffer());
       const text = new TextDecoder('utf-8', { fatal: false }).decode(bytes);
-      console.log(`[resolveProfileId] response length: ${text.length} chars`);
-      console.log('[resolveProfileId] SNIPPET:', text.slice(0, 600).replace(/\n+/g, ' '));
+      console.log('[resolveProfileId] response length: ', text.length, 'chars');
+      // Log two snippets: the start (meta/RSC) and a section likely to contain entityUrn
+      console.log('[resolveProfileId] SNIPPET (start):', text.slice(0, 400).replace(/\n+/g, ' '));
+      const urnIdx = text.indexOf('fsd_profile');
+      if (urnIdx !== -1) {
+        console.log('[resolveProfileId] SNIPPET (fsd_profile):', text.slice(Math.max(0, urnIdx - 20), urnIdx + 80));
+      } else {
+        console.log('[resolveProfileId] NOTE: "fsd_profile" not found in page — checking alternative patterns');
+      }
 
-      // Pattern 1: JSON entityUrn embedded in page data
-      let m = text.match(/"entityUrn"\s*:\s*"(urn:li:fsd_profile:[^"]+)"/);
+      // ── Pattern matching order (most specific → least specific) ─────────────────
+      const ctx = (profileId: string): PageContext => ({
+        profileId,
+        ...(appInstance      ? { applicationInstance:       appInstance  } : {}),
+        ...(pageForestId     ? { pageForestId:              pageForestId } : {}),
+        ...(trackingId       ? { pageInstanceTrackingId:   trackingId   } : {}),
+        ...(leafScreenId     ? { leafScreenId:              leafScreenId } : {}),
+        ...(appVersion       ? { appVersion:                appVersion   } : {}),
+      });
+
+      // Pattern 1a: JSON entityUrn — "entityUrn":"urn:li:fsd_profile:ID"
+      let m = text.match(/\"entityUrn\"\s*:\s*\"(urn:li:fsd_profile:[^\"]+)\"/);
       if (m?.[1]) {
         const id = m[1].replace('urn:li:fsd_profile:', '');
-        console.log(`[resolveProfileId] ✓ P1 (entityUrn): ${id.slice(0, 12)}…`);
-        return id;
+        console.log(`[resolveProfileId] ✓ P1a (entityUrn JSON): ${id.slice(0, 12)}… (${id.length} chars)`);
+        return ctx(id);
       }
 
-      // Pattern 2: RSC component key if LinkedIn serves RSC for navigation
-      m = text.match(/\.profile\.card\.ref([A-Za-z0-9+/=_-]{20,}?)(?=[A-Z])/);
-      if (m?.[1]) {
-        console.log(`[resolveProfileId] ✓ P2 (RSC key): ${m[1].slice(0, 12)}…`);
-        return m[1];
-      }
-
-      // Pattern 3: URL-encoded fsd_profile URN
-      m = text.match(/fsd_profile(?:%3A|:)([A-Za-z0-9+%/_=-]{20,}?)(?=[&"'\s])/);
+      // Pattern 1b: URL-encoded entityUrn — entityUrn%22%3A%22urn%3Ali%3Afsd_profile%3AID
+      m = text.match(/entityUrn(?:%22%3A%22|"\s*:\s*")urn(?:%3A|:)li(?:%3A|:)fsd_profile(?:%3A|:)([A-Za-z0-9+/=_-]{20,}?)(?=[%&"'\s])/);
       if (m?.[1]) {
         const id = decodeURIComponent(m[1]);
-        console.log(`[resolveProfileId] ✓ P3 (URL-encoded): ${id.slice(0, 12)}…`);
-        return id;
+        console.log(`[resolveProfileId] ✓ P1b (entityUrn URL-enc): ${id.slice(0, 12)}… (${id.length} chars)`);
+        return ctx(id);
+      }
+
+      // Pattern 3: URL-encoded fsd_profile URN (e.g. in image media URLs on the page).
+      // Uses a precise boundary: &, ", ', or whitespace — avoids overcapturing.
+      // Run BEFORE P2 (RSC greedy) which overcaptures by 7+ chars on long IDs.
+      m = text.match(/fsd_profile(?:%3A|:)([A-Za-z0-9+/=_-]{20,}?)(?=[&"'\s%])/);
+      if (m?.[1]) {
+        const id = decodeURIComponent(m[1]);
+        console.log(`[resolveProfileId] ✓ P3 (URL-encoded): ${id.slice(0, 12)}… (${id.length} chars)`);
+        return ctx(id);
       }
 
       // Pattern 4: vieweeProfileId field in embedded JSON
-      m = text.match(/"vieweeProfileId"\s*:\s*"([^"]{10,})"/);
+      m = text.match(/\"vieweeProfileId\"\s*:\s*\"([^\"]{10,})\"/);
       if (m?.[1]) {
-        console.log(`[resolveProfileId] ✓ P4 (vieweeProfileId): ${m[1].slice(0, 12)}…`);
-        return m[1];
+        console.log(`[resolveProfileId] ✓ P4 (vieweeProfileId): ${m[1].slice(0, 12)}… (${m[1].length} chars)`);
+        return ctx(m[1]);
       }
 
-      console.warn('[resolveProfileId] No pattern matched — share the SNIPPET above for debugging');
-      return undefined;
+      // Pattern 2 (LAST RESORT): RSC component key — can overcapture.
+      m = text.match(/\.profile\.card\.ref([A-Za-z0-9+/=_-]{20,})(?=[^A-Za-z0-9+/=_-])/);
+      if (m?.[1]) {
+        console.log(`[resolveProfileId] ✓ P2 (RSC key, last resort): ${m[1].slice(0, 12)}… (${m[1].length} chars)`);
+        return ctx(m[1]);
+      }
+
+      console.warn('[resolveProfileId] No profileId pattern matched — using session context only');
+      return {
+        ...(appInstance  ? { applicationInstance:     appInstance  } : {}),
+        ...(pageForestId ? { pageForestId:            pageForestId } : {}),
+        ...(trackingId   ? { pageInstanceTrackingId: trackingId   } : {}),
+        ...(leafScreenId ? { leafScreenId:            leafScreenId } : {}),
+        ...(appVersion   ? { appVersion:              appVersion   } : {}),
+      };
 
     } catch (err) {
       console.warn('[resolveProfileId] GET threw:', err instanceof Error ? err.message : err);
-      return undefined;
+      return {};
     }
   }
 
 
 
   async fetchComponent(options: ComponentOptions): Promise<RscResponse> {
+    // ── M1: Pre-flight auth validation ────────────────────────────────────
+    this.validateAuth();
+
     const sduiid = options.sduiid ?? options.componentId;
     const parentSpanId = generateParentSpanId();
     const query = new URLSearchParams({
@@ -316,8 +420,33 @@ export class LinkedInClient {
     };
 
     const headers = buildLinkedInHeaders(
-      buildProfileContext(options.publicIdentifier, routeUrl),
+      buildProfileContext(options.publicIdentifier, routeUrl, {
+        // Spread spreads only the keys that exist on pageContext — satisfies
+        // exactOptionalPropertyTypes (no explicit `undefined` assignments).
+        ...options.pageContext,
+      }),
     );
+
+    // ── M1: Structured pre-flight log (spec §14) — no secret values ───────
+    console.log("\n[LinkedIn Request]");
+    console.log("  method              :", "POST");
+    console.log("  url                 :", url);
+    console.log("  routeUrl            :", routeUrl);
+    console.log("  componentId         :", options.componentId);
+    console.log("  publicIdentifier    :", options.publicIdentifier);
+    console.log("  profileId           :", options.profileId ?? "(none)");
+    console.log("  applicationVersion  :", env.LINKEDIN_APP_VERSION);
+    console.log("  sduiVersion         :", env.LINKEDIN_SDUI_VERSION);
+    console.log("  hasCookie           :", Boolean(headers["cookie"]));
+    console.log("  hasCsrfToken        :", Boolean(headers["csrf-token"]));
+    console.log("  hasApplicationInstance:", Boolean(headers["x-li-application-instance"]));
+    console.log("  hasPageInstance     :", Boolean(headers["x-li-page-instance"]));
+    console.log("  hasPageForestId     :", Boolean(headers["x-li-pageforestid"]));
+    console.log("  hasTrackingId       :", Boolean(headers["x-li-page-instance-tracking-id"]));
+    console.log("  bodyKeys            :", Object.keys(body));
+    console.log("");
+    // ────────────────────────────────────────────────────────────────────────
+
     const response = await this.request(
       url,
       { method: "POST", headers, body: JSON.stringify(body) },

@@ -7,7 +7,7 @@ const envSchema = z.object({
   LINKEDIN_COOKIE: z.string().default(''),
   LINKEDIN_CSRF_TOKEN: z.string().default(''),
   LINKEDIN_USER_AGENT: z.string().default('Mozilla/5.0'),
-  LINKEDIN_APP_VERSION: z.string().default('0.2.6951'),
+  LINKEDIN_APP_VERSION: z.string().default('0.2.7003'),
   LINKEDIN_SDUI_VERSION: z.string().default('0.1.50904'),
   LINKEDIN_APPLICATION_INSTANCE: z.string().default(''),
   LINKEDIN_PAGE_INSTANCE: z.string().default(''),
