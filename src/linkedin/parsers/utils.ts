@@ -9,7 +9,7 @@ export function parseToStructuredItems(values: string[]) {
   
   for (let i = 0; i < values.length; i++) {
     const val = values[i];
-    if (val === 'Experience' || val === 'Education') continue;
+    if (val === 'Experience' || val === 'Education' || val === 'Projects' || val === 'Licenses & certifications' || val === 'Skills') continue;
     
     const next1 = values[i+1];
     const next2 = values[i+2];

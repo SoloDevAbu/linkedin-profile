@@ -268,6 +268,7 @@ export interface PaginationOptions {
   profileId: string;
   start?: number;
   count?: number;
+  pageContext?: PageContext;
 }
 
 /**
@@ -742,7 +743,7 @@ export class LinkedInClient {
 
     const url = `${pagerUrl}?sduiid=${encodeURIComponent(definition.pagerId)}`;
     const headers = buildLinkedInHeaders(
-      buildProfileContext(options.publicIdentifier, route),
+      buildProfileContext(options.publicIdentifier, route, options.pageContext),
     );
     headers["content-type"] = "application/json";
     const response = await this.request(

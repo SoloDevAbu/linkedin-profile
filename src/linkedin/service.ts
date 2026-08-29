@@ -5,6 +5,9 @@ import { parseBaseProfile } from './parsers/profile.js';
 import { normalizeBaseProfile } from './normalizers/profile.js';
 import { parseExperience } from './parsers/experience.js';
 import { parseEducation } from './parsers/education.js';
+import { parseProjects } from './parsers/projects.js';
+import { parseCertifications } from './parsers/certifications.js';
+import { parseSkills } from './parsers/skills.js';
 import type { ProfileResponse } from '../schemas/profile.js';
 
 export class LinkedInProfileService {
@@ -68,7 +71,30 @@ export class LinkedInProfileService {
     const profile = normalizeBaseProfile(base);
 
     profile.experience = parseExperience(experienceRes);
-    profile.education = parseEducation(below1Res);
+    
+    const resolvedProfileId = vieweeProfileId || base.profileId;
+    if (resolvedProfileId) {
+      const paginationOpts = {
+        publicIdentifier,
+        profileId: resolvedProfileId,
+        pageContext: baseRequestOpts.pageContext,
+        count: 50
+      };
+      
+      const [eduRes, projRes, certRes, skillsRes] = await Promise.allSettled([
+        this.client.fetchPagination({ ...paginationOpts, section: 'education' }),
+        this.client.fetchPagination({ ...paginationOpts, section: 'projects' }),
+        this.client.fetchPagination({ ...paginationOpts, section: 'certifications' }),
+        this.client.fetchPagination({ ...paginationOpts, section: 'skills' })
+      ]);
+      
+      if (eduRes.status === 'fulfilled') profile.education = parseEducation(eduRes.value);
+      if (projRes.status === 'fulfilled') profile.projects = parseProjects(projRes.value);
+      if (certRes.status === 'fulfilled') profile.certifications = parseCertifications(certRes.value);
+      if (skillsRes.status === 'fulfilled') profile.skills = parseSkills(skillsRes.value);
+    } else {
+      profile.education = parseEducation(below1Res);
+    }
 
     // Step 4: Merge htmlData (from SSR HTML) — these values are authoritative for
     // top-card fields (name, headline, location, image) and always override RSC-parsed values.
