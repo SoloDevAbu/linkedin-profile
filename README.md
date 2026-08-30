@@ -35,24 +35,24 @@ LinkedIn does not expose a public data API. All data is obtained by replicating 
 
 ## Key Features / Supported Profile Fields
 
-| Field | Source |
-|---|---|
-| `name` (first, last, full) | SSR HTML JSON-LD / `og:title` |
-| `headline` | SSR HTML JSON-LD / `og:description` |
-| `location` (raw string) | SSR HTML JSON-LD / `og:description` |
-| `about` | SSR HTML JSON-LD / SDUI RSC stream |
-| `profileImage.url` | SSR HTML `og:image` / `<link rel="preload">` |
-| `profileId` (member URN) | SSR HTML embedded JSON patterns |
-| `experience[]` | SDUI component `profileCardsExperienceOnly` |
-| `education[]` | Pagination endpoint (section: education) |
-| `projects[]` | Pagination endpoint (section: projects) |
-| `skills[]` | Pagination endpoint (section: skills) |
-| `certifications[]` | Pagination endpoint (section: certifications) |
-| `languages[]` | Stub (always `[]`) — parser not yet implemented |
+| Field                      | Source                                                                |
+| -------------------------- | --------------------------------------------------------------------- |
+| `name` (first, last, full) | SSR HTML `<title>` tag + RSC `profile_name_loading_state`             |
+| `headline`                 | RSC `profile_headline_loading_state` model state                      |
+| `location` (raw string)    | RSC `profile_location_loading_state` (often absent — see Limitations) |
+| `about`                    | RSC activity component rich-text (`$26a` span renderer)               |
+| `profileImage.url`         | SSR HTML `<link rel="preload">` `imageSrcSet`                         |
+| `profileId` (member URN)   | SSR HTML embedded fsd_profile URN patterns                            |
+| `experience[]`             | SDUI component `profileCardsExperienceOnly`                           |
+| `education[]`              | Pagination endpoint (section: education)                              |
+| `projects[]`               | Pagination endpoint (section: projects)                               |
+| `skills[]`                 | Pagination endpoint (section: skills)                                 |
+| `certifications[]`         | Pagination endpoint (section: certifications)                         |
+| `languages[]`              | Pagination endpoint (section: languages)                              |
 
 Structured section items (`experience`, `education`, `projects`, `certifications`) contain: `title`, `subtitle`, `dateRange`, `locationOrExtra`, and `description` where available.
 
-Skills items are returned as `{ name: string }` objects.
+Skills and Languages items are returned as objects (e.g. `{ name: string }` and `{ name: string, proficiency?: string }`).
 
 ---
 
@@ -111,12 +111,12 @@ The initial profile page load returns a standard HTML document. It embeds:
 
 The response headers on this request include fresh page-session identifiers that must be forwarded to every subsequent SDUI request:
 
-| Response header | Purpose |
-|---|---|
-| `x-li-application-instance` | Identifies the current application deployment instance |
-| `x-li-initialpageforestid` | Page-session trace root; doubles as the W3C `traceparent` traceId |
-| `x-li-page-instance-tracking-id` | Per-session tracking identifier |
-| `x-li-application-version` | Deployed app version string |
+| Response header                  | Purpose                                                           |
+| -------------------------------- | ----------------------------------------------------------------- |
+| `x-li-application-instance`      | Identifies the current application deployment instance            |
+| `x-li-initialpageforestid`       | Page-session trace root; doubles as the W3C `traceparent` traceId |
+| `x-li-page-instance-tracking-id` | Per-session tracking identifier                                   |
+| `x-li-application-version`       | Deployed app version string                                       |
 
 Using **stale** values from `.env` for these fields causes the SDUI server to return HTTP 500. The app always reads them fresh from the GET response.
 
@@ -131,12 +131,12 @@ Two request body shapes are used:
 
 Component IDs fetched:
 
-| Key | Component ID |
-|---|---|
-| activity | `com.linkedin.sdui.generated.profile.dsl.impl.profileCardsActivity` |
-| aboveActivity | `com.linkedin.sdui.generated.profile.dsl.impl.profileCardsAboveActivity` |
-| experience | `com.linkedin.sdui.generated.profile.dsl.impl.profileCardsExperienceOnly` |
-| below1 | `com.linkedin.sdui.generated.profile.dsl.impl.profileCardsBelowActivityPart1WithoutExp` |
+| Key           | Component ID                                                                            |
+| ------------- | --------------------------------------------------------------------------------------- |
+| activity      | `com.linkedin.sdui.generated.profile.dsl.impl.profileCardsActivity`                     |
+| aboveActivity | `com.linkedin.sdui.generated.profile.dsl.impl.profileCardsAboveActivity`                |
+| experience    | `com.linkedin.sdui.generated.profile.dsl.impl.profileCardsExperienceOnly`               |
+| below1        | `com.linkedin.sdui.generated.profile.dsl.impl.profileCardsBelowActivityPart1WithoutExp` |
 
 ### 3. RSC detail-screen navigation (`POST /flagship-web/in/<vanityName>/details/<section>/`)
 
@@ -148,12 +148,12 @@ Used to retrieve full section data (education, projects, certifications, skills)
 
 Pager IDs per section:
 
-| Section | Pager ID |
-|---|---|
-| education | `com.linkedin.sdui.pagers.profile.details.education` |
-| projects | `com.linkedin.sdui.pagers.profile.details.projects` |
+| Section        | Pager ID                                                  |
+| -------------- | --------------------------------------------------------- |
+| education      | `com.linkedin.sdui.pagers.profile.details.education`      |
+| projects       | `com.linkedin.sdui.pagers.profile.details.projects`       |
 | certifications | `com.linkedin.sdui.pagers.profile.details.certifications` |
-| skills | `com.linkedin.sdui.pagers.profile.details.skills` |
+| skills         | `com.linkedin.sdui.pagers.profile.details.skills`         |
 
 ### RSC response decoding
 
@@ -256,29 +256,29 @@ RATE_LIMIT_MAX=30
 RATE_LIMIT_WINDOW_MS=60000
 ```
 
-| Variable | Default | Required | Description |
-|---|---|---|---|
-| `NODE_ENV` | `development` | No | Runtime environment |
-| `HOST` | `0.0.0.0` | No | Bind address |
-| `PORT` | `3000` | No | Listen port |
-| `LINKEDIN_COOKIE` | _(empty)_ | **Yes** | Full `Cookie` header from authenticated session |
-| `LINKEDIN_CSRF_TOKEN` | _(empty)_ | No | CSRF token; auto-derived from `JSESSIONID` if blank |
-| `LINKEDIN_USER_AGENT` | Chrome 151 UA | No | `User-Agent` sent in all LinkedIn requests |
-| `LINKEDIN_APP_VERSION` | `0.2.7003` | No | Sent as `x-li-application-version` |
-| `LINKEDIN_APPLICATION_INSTANCE` | _(empty)_ | No | Overridden by fresh value from GET response |
-| `LINKEDIN_PAGE_INSTANCE` | _(empty)_ | No | Overridden by fresh value from GET response |
-| `LINKEDIN_PAGE_INSTANCE_TRACKING_ID` | _(empty)_ | No | Overridden by fresh value from GET response |
-| `LINKEDIN_PAGE_FOREST_ID` | _(empty)_ | No | Used as W3C traceparent traceId if set |
-| `LINKEDIN_ANCHOR_PAGE_KEY` | `d_flagship3_profile_view_base` | No | Sent as `x-li-anchor-page-key` |
-| `LINKEDIN_TIMEZONE` | `Asia/Calcutta` | No | Sent in `x-li-track` telemetry header |
-| `LINKEDIN_TIMEZONE_OFFSET` | `5.5` | No | Sent in `x-li-track` telemetry header |
-| `LINKEDIN_DEVICE_FORM_FACTOR` | `DESKTOP` | No | Sent in `x-li-track` telemetry header |
-| `LINKEDIN_DISPLAY_DENSITY` | `1.25` | No | Sent in `x-li-track` telemetry header |
-| `LINKEDIN_DISPLAY_WIDTH` | `1920` | No | Sent in `x-li-track` telemetry header |
-| `LINKEDIN_DISPLAY_HEIGHT` | `1080` | No | Sent in `x-li-track` telemetry header |
-| `REQUEST_TIMEOUT_MS` | `20000` | No | Per-request timeout in milliseconds |
-| `RATE_LIMIT_MAX` | `30` | No | Max requests per IP per window |
-| `RATE_LIMIT_WINDOW_MS` | `60000` | No | Rate-limit window in milliseconds |
+| Variable                             | Default                         | Required | Description                                         |
+| ------------------------------------ | ------------------------------- | -------- | --------------------------------------------------- |
+| `NODE_ENV`                           | `development`                   | No       | Runtime environment                                 |
+| `HOST`                               | `0.0.0.0`                       | No       | Bind address                                        |
+| `PORT`                               | `3000`                          | No       | Listen port                                         |
+| `LINKEDIN_COOKIE`                    | _(empty)_                       | **Yes**  | Full `Cookie` header from authenticated session     |
+| `LINKEDIN_CSRF_TOKEN`                | _(empty)_                       | No       | CSRF token; auto-derived from `JSESSIONID` if blank |
+| `LINKEDIN_USER_AGENT`                | Chrome 151 UA                   | No       | `User-Agent` sent in all LinkedIn requests          |
+| `LINKEDIN_APP_VERSION`               | `0.2.7003`                      | No       | Sent as `x-li-application-version`                  |
+| `LINKEDIN_APPLICATION_INSTANCE`      | _(empty)_                       | No       | Overridden by fresh value from GET response         |
+| `LINKEDIN_PAGE_INSTANCE`             | _(empty)_                       | No       | Overridden by fresh value from GET response         |
+| `LINKEDIN_PAGE_INSTANCE_TRACKING_ID` | _(empty)_                       | No       | Overridden by fresh value from GET response         |
+| `LINKEDIN_PAGE_FOREST_ID`            | _(empty)_                       | No       | Used as W3C traceparent traceId if set              |
+| `LINKEDIN_ANCHOR_PAGE_KEY`           | `d_flagship3_profile_view_base` | No       | Sent as `x-li-anchor-page-key`                      |
+| `LINKEDIN_TIMEZONE`                  | `Asia/Calcutta`                 | No       | Sent in `x-li-track` telemetry header               |
+| `LINKEDIN_TIMEZONE_OFFSET`           | `5.5`                           | No       | Sent in `x-li-track` telemetry header               |
+| `LINKEDIN_DEVICE_FORM_FACTOR`        | `DESKTOP`                       | No       | Sent in `x-li-track` telemetry header               |
+| `LINKEDIN_DISPLAY_DENSITY`           | `1.25`                          | No       | Sent in `x-li-track` telemetry header               |
+| `LINKEDIN_DISPLAY_WIDTH`             | `1920`                          | No       | Sent in `x-li-track` telemetry header               |
+| `LINKEDIN_DISPLAY_HEIGHT`            | `1080`                          | No       | Sent in `x-li-track` telemetry header               |
+| `REQUEST_TIMEOUT_MS`                 | `20000`                         | No       | Per-request timeout in milliseconds                 |
+| `RATE_LIMIT_MAX`                     | `30`                            | No       | Max requests per IP per window                      |
+| `RATE_LIMIT_WINDOW_MS`               | `60000`                         | No       | Rate-limit window in milliseconds                   |
 
 ---
 
@@ -309,6 +309,7 @@ By default the API listens on `http://0.0.0.0:3000`.
 Health check. No authentication required.
 
 **Response `200`**
+
 ```json
 { "status": "ok" }
 ```
@@ -371,10 +372,7 @@ The body must be a strict `{ url: string }` object. Any extra keys are rejected.
     }
   ],
   "projects": [],
-  "skills": [
-    { "name": "TypeScript" },
-    { "name": "Node.js" }
-  ],
+  "skills": [{ "name": "TypeScript" }, { "name": "Node.js" }],
   "certifications": [],
   "languages": []
 }
@@ -382,14 +380,14 @@ The body must be a strict `{ url: string }` object. Any extra keys are rejected.
 
 **Error responses**
 
-| Status | `error.code` | Meaning |
-|---|---|---|
-| `400` | `INVALID_REQUEST` | Body is not `{ url: string }` |
-| `400` | `INVALID_LINKEDIN_URL` | URL is not a valid `https://www.linkedin.com/in/<id>/` profile URL |
-| `429` | `RATE_LIMITED` | Client has exceeded the local rate limit |
-| `429` | `LINKEDIN_RATE_LIMITED` | LinkedIn returned HTTP 429 |
-| `502` | `LINKEDIN_REQUEST_FAILED` | LinkedIn returned 4xx/5xx (including 401/403 auth failure) |
-| `502` | `PROFILE_FETCH_FAILED` | Unexpected error during profile fetch |
+| Status | `error.code`              | Meaning                                                            |
+| ------ | ------------------------- | ------------------------------------------------------------------ |
+| `400`  | `INVALID_REQUEST`         | Body is not `{ url: string }`                                      |
+| `400`  | `INVALID_LINKEDIN_URL`    | URL is not a valid `https://www.linkedin.com/in/<id>/` profile URL |
+| `429`  | `RATE_LIMITED`            | Client has exceeded the local rate limit                           |
+| `429`  | `LINKEDIN_RATE_LIMITED`   | LinkedIn returned HTTP 429                                         |
+| `502`  | `LINKEDIN_REQUEST_FAILED` | LinkedIn returned 4xx/5xx (including 401/403 auth failure)         |
+| `502`  | `PROFILE_FETCH_FAILED`    | Unexpected error during profile fetch                              |
 
 ```json
 {
@@ -467,15 +465,15 @@ pnpm test:watch
 
 ### Unit tests
 
-| File | What is tested |
-|---|---|
-| `tests/unit/url.test.ts` | `extractPublicIdentifier` accepts valid LinkedIn `/in/` URLs and rejects company/other routes |
+| File                         | What is tested                                                                                                                   |
+| ---------------------------- | -------------------------------------------------------------------------------------------------------------------------------- |
+| `tests/unit/url.test.ts`     | `extractPublicIdentifier` accepts valid LinkedIn `/in/` URLs and rejects company/other routes                                    |
 | `tests/unit/headers.test.ts` | `buildLinkedInHeaders` correctly derives the `csrf-token` from `JSESSIONID`, sets `cookie`, and includes `x-li-rsc-stream: true` |
 
 ### Integration tests
 
-| File | What is tested |
-|---|---|
+| File                                | What is tested                                                                                       |
+| ----------------------------------- | ---------------------------------------------------------------------------------------------------- |
 | `tests/integration/profile.test.ts` | `POST /v1/profile` with an invalid body returns `400` without making any network request to LinkedIn |
 
 The integration test uses Fastify's `app.inject()` — no HTTP server is started and no network calls are made.
@@ -510,16 +508,16 @@ docker run -p 3000:3000 --env-file .env linkedin-profile-api
 
 The following situations will cause partial or failed responses:
 
-| Limitation | Detail |
-|---|---|
-| **Internal API changes** | All LinkedIn endpoints (`/flagship-web/rsc-action/...`) are undocumented. Component IDs, request body shapes, or RSC stream formats can change with any LinkedIn deployment. |
-| **Session expiry** | `LINKEDIN_COOKIE` must be periodically refreshed. A 401/403 from LinkedIn results in a `502` from this API. |
-| **RSC text-stream parsing** | Parsers use regex over rendered text nodes rather than structured entity extraction. Output quality depends on the stability of LinkedIn's RSC render tree. Fields that appear in the RSC stream under different component structures across different profile types may be missed. |
-| **`languages` field** | The languages parser is a stub and always returns an empty array. |
-| **`location` sub-fields** | `city`, `region`, and `country` are always `null`; only `raw` is populated (from the SSR HTML). |
-| **Private profiles** | If the authenticated account cannot view a profile, LinkedIn returns an empty or restricted page. The API will return nulls for most fields. |
-| **Rate limiting** | LinkedIn's own rate limiting (HTTP 429) is proxied as `429 LINKEDIN_RATE_LIMITED`. Spreading requests over time is recommended. |
-| **Profile photo for private profiles** | The `og:image` fallback may return a generic silhouette URL rather than the actual photo. |
+| Limitation                             | Detail                                                                                                                                                                                                                                                                              |
+| -------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Internal API changes**               | All LinkedIn endpoints (`/flagship-web/rsc-action/...`) are undocumented. Component IDs, request body shapes, or RSC stream formats can change with any LinkedIn deployment.                                                                                                        |
+| **Session expiry**                     | `LINKEDIN_COOKIE` must be periodically refreshed. A 401/403 from LinkedIn results in a `502` from this API.                                                                                                                                                                         |
+| **RSC text-stream parsing**            | Parsers use regex over rendered text nodes rather than structured entity extraction. Output quality depends on the stability of LinkedIn's RSC render tree. Fields that appear in the RSC stream under different component structures across different profile types may be missed. |
+| **`location` field**                   | LinkedIn's current Flagship Web SSR response no longer includes OG tags, JSON-LD, or a `profile_location_loading_state` model state in the RSC stream. As a result, `location.raw` is `null` for most profiles. `city`, `region`, and `country` are always `null`.                  |
+| **No OG/JSON-LD in SSR HTML**          | LinkedIn now serves its SSR pages as pure React hydration bundles without `og:title`, `og:description`, `og:image`, or JSON-LD blocks. Headline, name, and about text are all sourced exclusively from RSC model states and rich-text components.                                   |
+| **Private profiles**                   | If the authenticated account cannot view a profile, LinkedIn returns an empty or restricted page. The API will return nulls for most fields.                                                                                                                                        |
+| **Rate limiting**                      | LinkedIn's own rate limiting (HTTP 429) is proxied as `429 LINKEDIN_RATE_LIMITED`. Spreading requests over time is recommended.                                                                                                                                                     |
+| **Profile photo for private profiles** | The `<link rel="preload">` fallback may return a generic silhouette URL rather than the actual photo.                                                                                                                                                                               |
 
 ---
 
