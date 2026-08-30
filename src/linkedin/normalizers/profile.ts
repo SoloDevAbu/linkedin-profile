@@ -16,8 +16,8 @@ export function normalizeBaseProfile(
     experience: [],
     education: [],
     projects: [],
-    skills: [],
     certifications: [],
     languages: [],
+    skills: [],
   };
 }

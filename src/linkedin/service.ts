@@ -118,10 +118,10 @@ export class LinkedInProfileService {
         profile.projects = parseProjects(projRes.value);
       if (certRes.status === "fulfilled")
         profile.certifications = parseCertifications(certRes.value);
-      if (skillsRes.status === "fulfilled")
-        profile.skills = parseSkills(skillsRes.value);
       if (langRes.status === "fulfilled")
         profile.languages = parseLanguages(langRes.value);
+      if (skillsRes.status === "fulfilled")
+        profile.skills = parseSkills(skillsRes.value);
     } else {
       profile.education = parseEducation(below1Res);
     }

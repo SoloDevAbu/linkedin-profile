@@ -29,9 +29,9 @@ export const profileResponseSchema = z.object({
   experience: z.array(z.unknown()),
   education: z.array(z.unknown()),
   projects: z.array(z.unknown()),
-  skills: z.array(z.unknown()),
   certifications: z.array(z.unknown()),
   languages: z.array(z.unknown()),
+  skills: z.array(z.unknown()),
 });
 
 export type ProfileRequest = z.infer<typeof profileRequestSchema>;
