@@ -116,37 +116,54 @@ function collectTextNodes(node: unknown, out: string[]): void {
 }
 
 /**
- * Try to extract the "About" text from the profileCardsBelowActivityPart5 component.
- * The About section uses viewName "profile-about-section".
- * In the RSC stream the about text appears as pre-rendered children strings.
- *
- * We use a targeted JSON snippet approach: find the "about-section" area and
- * extract the first large text block.
+ * Returns true if a string looks like a CSS class-name token.
+ * LinkedIn RSC className values are hex hashes: e.g. "aa13b50b", "_01e54e47".
+ * They contain only lowercase hex digits (0-9, a-f) and leading underscores.
  */
+function isCssClassString(s: string): boolean {
+  return s
+    .trim()
+    .split(/\s+/)
+    .every((token) => /^_?[0-9a-f]{6,}$/i.test(token));
+}
+
 function findAbout(text: string): string | null {
-  // LinkedIn "About" section observable identifier
-  const aboutIdx = text.indexOf("aboutSection");
-  if (aboutIdx === -1) return null;
-  // Take a 5000-char window around it
-  const window = text.slice(Math.max(0, aboutIdx - 200), aboutIdx + 5000);
-  const texts: string[] = [];
-  // Extract quoted strings that look like paragraphs (longer than 30 chars)
-  const re = /"children"\s*:\s*\[[^\n\]]*?"([^"$][^"]{29,})"/g;
+  const headlineIdx = text.indexOf('"profile_headline_loading_state"');
+  const searchFrom = headlineIdx >= 0 ? headlineIdx : 0;
+
+  const anchorIdx = text.indexOf("typographyVars", searchFrom);
+  if (anchorIdx === -1) return null;
+
+  const win = text.slice(Math.max(0, anchorIdx - 50), anchorIdx + 15000);
+
+  const lineRe =
+    /"children"\s*:\s*\[\s*(?:\["\$","br",null,\{\}\]|null)\s*,\s*"((?:[^"\\]|\\.)*)"/g;
+
+  const lines: string[] = [];
   let m: RegExpExecArray | null;
-  while ((m = re.exec(window)) !== null) {
-    const candidate = clean(m[1]);
-    if (
-      candidate &&
-      candidate.length > 30 &&
-      candidate.split(" ").length > 3 && // Natural sentences usually have spaces
-      !candidate.startsWith("_") && // Filter CSS classes like _5b216717
-      !candidate.startsWith("com.linkedin") &&
-      !candidate.includes("urn:li")
-    ) {
-      texts.push(candidate);
+  while ((m = lineRe.exec(win)) !== null) {
+    const raw = m[1];
+    if (!raw) continue;
+    let line: string;
+    try {
+      line = JSON.parse(`"${raw}"`) as string;
+    } catch {
+      line = raw;
     }
+    line = line.trim();
+    if (!line) continue;
+    if (isCssClassString(line)) continue;
+    if (line.startsWith("com.linkedin")) continue;
+    if (line.includes("urn:li")) continue;
+    if (line.startsWith("$")) continue;
+    lines.push(line);
   }
-  return texts.length > 0 ? (texts.join("\n\n") ?? null) : null;
+
+  if (lines.length === 0) return null;
+
+  const unique = lines.filter((l, i) => l !== lines[i - 1]);
+
+  return unique.join("\n") || null;
 }
 
 /**
@@ -155,6 +172,18 @@ function findAbout(text: string): string | null {
 function findHeadline(text: string): string | null {
   const match = text.match(
     /"id"\s*:\s*"profile_headline_loading_state".*?"stringValue"\s*:\s*"([^"]+)"/,
+  );
+  return clean(match?.[1]);
+}
+
+/**
+ * Extract the location from the `profile_location_loading_state` stringValue.
+ * This model state is present for profiles that have a structured location set.
+ * Returns null if absent.
+ */
+function findLocation(text: string): string | null {
+  const match = text.match(
+    /"id"\s*:\s*"profile_location_loading_state".*?"stringValue"\s*:\s*"([^"]+)"/,
   );
   return clean(match?.[1]);
 }
@@ -179,8 +208,9 @@ export function parseBaseProfile(response: RscResponse): ParsedBaseProfile {
 
   const headline = findHeadline(text);
 
+  const rawLocation = findLocation(text);
   const location: ParsedBaseProfile["location"] = {
-    raw: null,
+    raw: rawLocation,
     city: null,
     region: null,
     country: null,
